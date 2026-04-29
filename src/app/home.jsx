@@ -1,4 +1,4 @@
-import { Header } from './components/Header';
+/*import { Header } from './components/Header';
 import { JobPost } from './components/Post';
 import { Sidebar } from './components/Sidebar';
 import './App.css'
@@ -47,7 +47,6 @@ export default function App(){
         <div className="hidden xl:block w-72 shrink-0" />
       </main>
     </div>  
-  ) 
+  );
 }
-
-
+  */
