@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import Logo from '../../components/Logo.jsx'
+import Logo from '../../components/LogoLogin.jsx'
 
 // Demo credentials for testing
 const DEMO_USERS = [
-  { email: 'jobseeker@parttimed.ph', password: 'password123', name: 'Juan dela Cruz', type: 'jobseeker' },
-  { email: 'employer@parttimed.ph', password: 'password123', name: 'Maria Santos', type: 'employer' },
+  { email: 'jobseeker@parttimed.ph', password: 'password123', name: 'Turingan Smith', type: 'jobseeker' },
+  { email: 'employer@parttimed.ph', password: 'password123', name: 'John Epstein Carlos III', type: 'employer' },
 ]
 
 export default function LoginPage({ onLogin, onRegister }) {
@@ -81,7 +81,7 @@ export default function LoginPage({ onLogin, onRegister }) {
         </div>
 
         <p className="text-white/40 text-sm relative z-10">
-          © 2025 PARTimed. Proudly serving Naga City.
+          © 2026 PARTimed. Proudly serving Naga City.
         </p>
       </div>
 
@@ -225,7 +225,8 @@ export default function LoginPage({ onLogin, onRegister }) {
 
           {/* Demo hint */}
           <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs text-center">
-            <strong>Demo:</strong> jobseeker@parttimed.ph / password123
+            <strong>Demo:</strong> jobseeker@parttimed.ph / password123 <br/>
+            <strong>Demo:</strong> employer@parttimed.ph / password123
           </div>
         </div>
       </div>

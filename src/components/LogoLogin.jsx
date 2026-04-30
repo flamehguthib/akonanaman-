@@ -1,4 +1,4 @@
-import logo from '../assets/logo_dark.jpg';
+import logo from '../assets/logo.jpg';
 
 
 export default function Logo({ size = 40, textSize = 'text-2xl', color = 'text-indigo-950' }) {
