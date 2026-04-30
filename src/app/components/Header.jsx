@@ -11,7 +11,7 @@ export function Header() {
             Part<span className="text-blue-600">Time</span>
           </h1>
         </div>
-
+        
         {/* Search Bar - Flex-1 makes it take up the middle space */}
         <div className="hidden flex-1 max-w-2xl md:block">
           <div className="relative">
