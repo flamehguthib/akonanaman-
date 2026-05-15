@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth'
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import Logo from '../../components/Logo.jsx'
+import { auth, db } from '../../lib/firebase.js'
 
 const STEPS = [
   { id: 1, title: 'Account Type' },
@@ -29,6 +32,7 @@ export default function RegisterPage({ onBack, onSuccess }) {
     accountType: '',
     fullName: '',
     email: '',
+    password: '',
     mobile: '',
     address: '',
     idType: '',
@@ -52,6 +56,8 @@ export default function RegisterPage({ onBack, onSuccess }) {
       if (!form.fullName.trim()) newErrors.fullName = 'Full name is required.'
       if (!form.email.trim()) newErrors.email = 'Email is required.'
       else if (!/\S+@\S+\.\S+/.test(form.email)) newErrors.email = 'Invalid email address.'
+      if (!form.password.trim()) newErrors.password = 'Password is required.'
+      else if (form.password.length < 6) newErrors.password = 'Password must be at least 6 characters.'
       if (!form.mobile.trim()) newErrors.mobile = 'Mobile number is required.'
       if (!form.address.trim()) newErrors.address = 'Residential address is required.'
     }
@@ -88,13 +94,46 @@ export default function RegisterPage({ onBack, onSuccess }) {
     }
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validateStep()) return
     setSubmitting(true)
-    setTimeout(() => {
-      setSubmitting(false)
+
+    try {
+      const account = await createUserWithEmailAndPassword(auth, form.email, form.password)
+
+      await updateProfile(account.user, {
+        displayName: form.fullName,
+      })
+
+      await setDoc(doc(db, 'users', account.user.uid), {
+        uid: account.user.uid,
+        fullName: form.fullName,
+        email: form.email,
+        mobile: form.mobile,
+        address: form.address,
+        accountType: form.accountType,
+        idType: form.idType,
+        idFrontFileName: form.idFrontFile?.name ?? null,
+        idSelfieFileName: form.idSelfieFile?.name ?? null,
+        businessName: form.businessName || '',
+        businessNature: form.businessNature || '',
+        proofFileName: form.proofFile?.name ?? null,
+        privacyAgreed: form.privacyAgreed,
+        verificationStatus: 'pending',
+        createdAt: serverTimestamp(),
+      })
       setSubmitted(true)
-    }, 1500)
+    } catch (submitError) {
+      if (submitError.code === 'auth/email-already-in-use') {
+        setErrors(prev => ({ ...prev, email: 'That email is already in use.' }))
+      } else if (submitError.code === 'auth/weak-password') {
+        setErrors(prev => ({ ...prev, password: 'Password must be at least 6 characters.' }))
+      } else {
+        setErrors(prev => ({ ...prev, submit: 'Could not create your account right now.' }))
+      }
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const activeSteps = form.accountType === 'jobseeker'
@@ -250,6 +289,15 @@ export default function RegisterPage({ onBack, onSuccess }) {
                       className="input-field w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-700 bg-gray-50 focus:bg-white"
                     />
                   </FormField>
+                  <FormField label="Password" note="Use at least 6 characters" error={errors.password}>
+                    <input
+                      type="password"
+                      value={form.password}
+                      onChange={e => update('password', e.target.value)}
+                      placeholder="Create a password"
+                      className="input-field w-full px-4 py-3 border border-gray-200 rounded-xl text-sm text-gray-700 bg-gray-50 focus:bg-white"
+                    />
+                  </FormField>
                   <FormField label="Mobile Number" note="Required for real-time job alerts via SMS" error={errors.mobile}>
                     <input
                       type="tel"
@@ -391,6 +439,7 @@ export default function RegisterPage({ onBack, onSuccess }) {
                   </label>
                 </div>
                 <FieldError error={errors.privacyAgreed} />
+                <FieldError error={errors.submit} />
               </div>
             )}
 

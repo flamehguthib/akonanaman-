@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
 import Logo from '../../components/Logo.jsx'
+import { db } from '../../lib/firebase.js'
 
 const SAMPLE_JOBS = [
   { id: 1, title: 'Barista / Cashier', company: 'Café de Naga', location: 'Magsaysay Ave, Naga City', pay: '₱500/day', type: 'Food & Beverage', schedule: 'Weekends', posted: '2 hours ago', tags: ['Part-time', 'No Experience'], logo: 'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fimages-cdn.9gag.com%2Fphoto%2FaR00XBA_700b.jpg&f=1&nofb=1&ipt=a2828cdb9ffa87f389900c493671524024c47c97664bd4893b181f024d9694ab' },
@@ -38,22 +40,221 @@ const TYPE_COLORS = {
 }
 
 export default function DashboardPage({ user, onLogout }) {
-  const [activeNav, setActiveNav] = useState(user.type === 'employer' ? 'applicants' : 'browse')
+  const [activeNav, setActiveNav] = useState(user?.type === 'employer' ? 'applicants' : 'browse')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [appliedJobs, setAppliedJobs] = useState([])
   const [search, setSearch] = useState('')
+  const [liveJobs, setLiveJobs] = useState([])
+  const [applications, setApplications] = useState([])
+  const [posting, setPosting] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [postSuccess, setPostSuccess] = useState('')
+  const [postError, setPostError] = useState('')
+  const [jobForm, setJobForm] = useState({
+    title: '',
+    pay: '',
+    schedule: '',
+    location: '',
+    description: '',
+    imageUrl: '',
+  })
 
-  const isEmployer = user.type === 'employer'
+  useEffect(() => {
+    if (user?.type === 'employer') {
+      setActiveNav('applicants')
+    }
+  }, [user])
+
+  useEffect(() => {
+    const jobsQuery = query(collection(db, 'jobs'), orderBy('createdAt', 'desc'))
+
+    const unsubscribe = onSnapshot(jobsQuery, (snapshot) => {
+      setLiveJobs(
+        snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }))
+      )
+    })
+
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'applications'), (snapshot) => {
+      setApplications(
+        snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }))
+      )
+    })
+
+    return unsubscribe
+  }, [])
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#f5f6ff] text-gray-600">
+        Signing out...
+      </div>
+    )
+  }
+
+  const isEmployer = user?.type === 'employer'
   const navItems = isEmployer ? NAV_ITEMS_EMPLOYER : NAV_ITEMS_JOBSEEKER
+  const userApplications = applications.filter(app => app.applicantUid === user.uid)
+  const appliedJobIds = new Set([
+    ...appliedJobs,
+    ...userApplications.map(app => app.jobId),
+  ])
 
-  const filteredJobs = SAMPLE_JOBS.filter(j =>
+  const allJobs = [
+    ...liveJobs.map(job => ({
+      id: job.id,
+      title: job.title || 'Untitled Job',
+      company: job.employerName || 'Employer',
+      location: job.location || '',
+      pay: job.pay || '',
+      type: job.jobCategory || 'Hiring',
+      schedule: job.schedule || '',
+      posted: 'Just now',
+      tags: ['Part-time'],
+      logo: job.imageUrl || 'https://via.placeholder.com/80?text=Job',
+      description: job.description || '',
+      employerUid: job.employerUid,
+    })),
+    ...SAMPLE_JOBS,
+  ]
+
+  const filteredJobs = allJobs.filter(j =>
     j.title.toLowerCase().includes(search.toLowerCase()) ||
     j.company.toLowerCase().includes(search.toLowerCase()) ||
     j.type.toLowerCase().includes(search.toLowerCase())
   )
 
-  const handleApply = (jobId) => {
-    if (!appliedJobs.includes(jobId)) setAppliedJobs(prev => [...prev, jobId])
+  const employerJobs = liveJobs.filter(job => job.employerUid === user.uid)
+  const employerApplicants = applications.filter(app => app.employerUid === user.uid)
+
+  const updateJobForm = (field, value) => {
+    setJobForm(prev => ({ ...prev, [field]: value }))
+    setPostError('')
+    setPostSuccess('')
+  }
+
+  const handleJobImageChange = async (event) => {
+    const file = event.target.files?.[0]
+
+    if (!file) return
+
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+
+    setPostError('')
+    setPostSuccess('')
+    setUploadingImage(true)
+
+    if (!cloudName || !uploadPreset) {
+      setUploadingImage(false)
+      setPostError('Add VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET to .env.local first.')
+      event.target.value = ''
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('upload_preset', uploadPreset)
+    formData.append('folder', 'partimed/jobs')
+
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+        method: 'POST',
+        body: formData,
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result?.error?.message || 'Image upload failed.')
+      }
+
+      setJobForm(prev => ({
+        ...prev,
+        imageUrl: result.secure_url,
+      }))
+    } catch (error) {
+      setJobForm(prev => ({
+        ...prev,
+        imageUrl: '',
+      }))
+      setPostError(error?.message || 'Could not upload the image.')
+    } finally {
+      setUploadingImage(false)
+      event.target.value = ''
+    }
+  }
+
+  const handleApply = async (job) => {
+    if (appliedJobIds.has(job.id)) return
+
+    setAppliedJobs(prev => [...prev, job.id])
+
+    try {
+      await addDoc(collection(db, 'applications'), {
+        jobId: job.id,
+        jobTitle: job.title,
+        company: job.company,
+        employerUid: job.employerUid || null,
+        applicantUid: user.uid,
+        applicantName: user.name || 'Applicant',
+        applicantEmail: user.email || '',
+        status: 'New',
+        createdAt: serverTimestamp(),
+      })
+    } catch (error) {
+      setAppliedJobs(prev => prev.filter(id => id !== job.id))
+    }
+  }
+
+  const handlePostJob = async () => {
+    if (!jobForm.title.trim() || !jobForm.pay.trim() || !jobForm.schedule.trim() || !jobForm.location.trim() || !jobForm.description.trim()) {
+      setPostError('Please complete all job fields before posting.')
+      return
+    }
+
+    setPosting(true)
+    setPostError('')
+    setPostSuccess('')
+
+    try {
+      await addDoc(collection(db, 'jobs'), {
+        title: jobForm.title.trim(),
+        pay: jobForm.pay.trim(),
+        schedule: jobForm.schedule.trim(),
+        location: jobForm.location.trim(),
+        description: jobForm.description.trim(),
+        imageUrl: jobForm.imageUrl || '',
+        employerUid: user.uid,
+        employerName: user.name || 'Employer',
+        employerEmail: user.email || '',
+        status: 'open',
+        createdAt: serverTimestamp(),
+      })
+
+      setJobForm({
+        title: '',
+        pay: '',
+        schedule: '',
+        location: '',
+        description: '',
+        imageUrl: '',
+      })
+      setPostSuccess('Hiring posted successfully.')
+    } catch (error) {
+      setPostError(error?.message || 'Could not post the job right now.')
+    } finally {
+      setPosting(false)
+    }
   }
 
   return (
@@ -74,11 +275,11 @@ export default function DashboardPage({ user, onLogout }) {
         <div className="p-4 mx-3 my-3 bg-violet-50 border border-violet-100 rounded-2xl">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-              {user.name.split(' ').map(n => n[0]).join('').slice(0,2)}
+              {((user?.name ?? 'User').split(' ').map(n => n[0]).join('').slice(0,2))}
             </div>
             <div className="min-w-0">
-              <p className="font-semibold text-indigo-950 text-sm truncate">{user.name}</p>
-              <p className="text-xs text-violet-600 capitalize">{user.type}</p>
+              <p className="font-semibold text-indigo-950 text-sm truncate">{user?.name ?? 'User'}</p>
+              <p className="text-xs text-violet-600 capitalize">{user?.type ?? ''}</p>
             </div>
           </div>
         </div>
@@ -198,15 +399,15 @@ export default function DashboardPage({ user, onLogout }) {
                       ))}
                     </div>
                     <button
-                      onClick={() => handleApply(job.id)}
-                      disabled={appliedJobs.includes(job.id)}
+                      onClick={() => handleApply(job)}
+                      disabled={appliedJobIds.has(job.id)}
                       className={`w-full py-2 rounded-xl text-sm font-semibold transition-all ${
-                        appliedJobs.includes(job.id)
+                        appliedJobIds.has(job.id)
                           ? 'bg-green-100 text-green-700 cursor-default'
                           : 'btn-primary text-white'
                       }`}
                     >
-                      {appliedJobs.includes(job.id) ? '✓ Applied' : 'Apply Now'}
+                      {appliedJobIds.has(job.id) ? '✓ Applied' : 'Apply Now'}
                     </button>
                   </div>
                 ))}
@@ -225,7 +426,7 @@ export default function DashboardPage({ user, onLogout }) {
           {/* MY APPLICATIONS */}
           {activeNav === 'applied' && (
             <div className="animate-fade-in-up max-w-2xl">
-              {appliedJobs.length === 0 ? (
+              {userApplications.length === 0 ? (
                   <div className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-12 text-center text-gray-400">
                   <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -238,21 +439,18 @@ export default function DashboardPage({ user, onLogout }) {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {SAMPLE_JOBS.filter(j => appliedJobs.includes(j.id)).map(job => (
-                    <div key={job.id} className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100">
-                          <img 
-                              src={job.logo} 
-                              alt={job.company} 
-                              className="w-full h-full object-cover"
-                              onError={(e) => { e.target.src = 'https://via.placeholder.com/40'; }} // Fallback if image fails
-                            />
+                  {userApplications.map(app => (
+                    <div key={app.id} className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 bg-violet-50 flex items-center justify-center text-violet-700 font-bold text-xs">
+                          {app.company ? app.company.slice(0, 2).toUpperCase() : 'JB'}
                         </div>
-                        <p className="font-semibold text-indigo-950 text-sm">{job.title}</p>
-                        <p className="text-xs text-gray-500">{job.company} · {job.location}</p>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-indigo-950 text-sm truncate">{app.jobTitle || 'Hiring'}</p>
+                          <p className="text-xs text-gray-500 truncate">{app.company || 'Employer'} · {app.createdAt?.toDate ? app.createdAt.toDate().toLocaleDateString() : 'Recently applied'}</p>
+                        </div>
                       </div>
-                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium flex-shrink-0">Under Review</span>
+                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium flex-shrink-0">{app.status || 'Under Review'}</span>
                     </div>
                   ))}
                 </div>
@@ -263,26 +461,32 @@ export default function DashboardPage({ user, onLogout }) {
           {/* APPLICANTS (employer) */}
           {activeNav === 'applicants' && (
             <div className="animate-fade-in-up max-w-2xl">
-              <div className="space-y-3">
-                {EMPLOYER_APPLICANTS.map(app => (
-                  <div key={app.id} className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                      <img src={app.avatar} className="w-10 h-10 rounded-full object-cover"></img>
+              {employerApplicants.length === 0 ? (
+                <div className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-8 text-center text-gray-500">
+                  No applicants yet. Once someone applies, they will appear here.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {employerApplicants.map(app => (
+                    <div key={app.id} className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0 overflow-hidden">
+                        <span>{(app.applicantName || 'A').split(' ').map(n => n[0]).join('').slice(0, 2)}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-indigo-950 text-sm">{app.applicantName || 'Applicant'}</p>
+                        <p className="text-xs text-gray-500">Applied for: {app.jobTitle || 'Hiring'} · {app.applicantEmail || ''}</p>
+                      </div>
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${
+                        app.status === 'New' ? 'bg-blue-100 text-blue-700' :
+                        app.status === 'Reviewed' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        {app.status || 'New'}
+                      </span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-indigo-950 text-sm">{app.name}</p>
-                      <p className="text-xs text-gray-500">Applied for: {app.role} · {app.date}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium flex-shrink-0 ${
-                      app.status === 'New' ? 'bg-blue-100 text-blue-700' :
-                      app.status === 'Reviewed' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-green-100 text-green-700'
-                    }`}>
-                      {app.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -292,16 +496,18 @@ export default function DashboardPage({ user, onLogout }) {
               <div className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-6 space-y-4">
                 <h2 className="font-extrabold tracking-tight text-indigo-950 text-xl">Post a New Job</h2>
                 {[
-                  { label: 'Job Title', placeholder: 'e.g. Barista, Sales Associate' },
-                  { label: 'Pay / Rate', placeholder: 'e.g. ₱500/day' },
-                  { label: 'Schedule', placeholder: 'e.g. Weekends, Flexible' },
-                  { label: 'Location', placeholder: 'e.g. Magsaysay Ave, Naga City' },
+                  { label: 'Job Title', key: 'title', placeholder: 'e.g. Barista, Sales Associate' },
+                  { label: 'Pay / Rate', key: 'pay', placeholder: 'e.g. ₱500/day' },
+                  { label: 'Schedule', key: 'schedule', placeholder: 'e.g. Weekends, Flexible' },
+                  { label: 'Location', key: 'location', placeholder: 'e.g. Magsaysay Ave, Naga City' },
                 ].map(f => (
                   <div key={f.label}>
                     <label className="block text-sm font-semibold text-indigo-950 mb-1">{f.label}</label>
                     <input
                       type="text"
                       placeholder={f.placeholder}
+                      value={jobForm[f.key]}
+                      onChange={e => updateJobForm(f.key, e.target.value)}
                       className="input-field w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white"
                     />
                   </div>
@@ -311,12 +517,59 @@ export default function DashboardPage({ user, onLogout }) {
                   <textarea
                     rows={4}
                     placeholder="Describe the role, requirements, and responsibilities..."
+                    value={jobForm.description}
+                    onChange={e => updateJobForm('description', e.target.value)}
                     className="input-field w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white resize-none"
                   />
                 </div>
-                <button className="btn-primary w-full py-3 rounded-xl text-white font-semibold text-sm">
-                  Post Job
+                <div>
+                  <label className="block text-sm font-semibold text-indigo-950 mb-1">Job Image</label>
+                  <div className="rounded-xl border-2 border-dashed border-violet-200 bg-violet-50/40 p-4 space-y-3">
+                    {jobForm.imageUrl ? (
+                      <img src={jobForm.imageUrl} alt="Job preview" className="w-full h-40 object-cover rounded-xl border border-violet-100" />
+                    ) : (
+                      <div className="h-40 flex items-center justify-center text-sm text-gray-500 rounded-xl bg-white border border-gray-100">
+                        No image uploaded yet.
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleJobImageChange}
+                      className="block w-full text-sm text-gray-600"
+                    />
+                    <p className="text-xs text-gray-500">Upload a hiring poster or image. It will be stored in Cloudinary and shown to applicants.</p>
+                    {uploadingImage && <p className="text-xs font-medium text-violet-600">Uploading image...</p>}
+                  </div>
+                </div>
+                {postError && <p className="text-sm text-red-500">{postError}</p>}
+                {postSuccess && <p className="text-sm text-green-600">{postSuccess}</p>}
+                <button
+                  onClick={handlePostJob}
+                  disabled={posting || uploadingImage}
+                  className="btn-primary w-full py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-70"
+                >
+                  {posting ? 'Posting...' : uploadingImage ? 'Uploading image...' : 'Post Job'}
                 </button>
+              </div>
+
+              <div className="mt-4 bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-5">
+                <h3 className="font-bold text-indigo-950 mb-3">Your recent postings</h3>
+                {employerJobs.length === 0 ? (
+                  <p className="text-sm text-gray-500">No hirings posted yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {employerJobs.map(job => (
+                      <div key={job.id} className="rounded-xl border border-gray-100 p-3 flex items-center gap-3">
+                        <img src={job.imageUrl || 'https://via.placeholder.com/64?text=Job'} alt={job.title} className="w-14 h-14 rounded-lg object-cover border border-gray-100 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm text-indigo-950 truncate">{job.title}</p>
+                          <p className="text-xs text-gray-500">{job.location} · {job.pay}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

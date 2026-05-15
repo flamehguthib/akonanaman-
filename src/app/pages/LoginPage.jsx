@@ -1,13 +1,9 @@
 import { useState } from 'react'
+import { signInWithEmailAndPassword } from 'firebase/auth'
 import Logo from '../../components/LogoLogin.jsx'
+import { auth } from '../../lib/firebase.js'
 
-// Demo credentials for testing
-const DEMO_USERS = [
-  { email: 'jobseeker@parttimed.ph', password: 'password123', name: 'Turingan Smith', type: 'jobseeker' },
-  { email: 'employer@parttimed.ph', password: 'password123', name: 'John Epstein Carlos III', type: 'employer' },
-]
-
-export default function LoginPage({ onLogin, onRegister }) {
+export default function LoginPage({ onRegister }) {
   const [form, setForm] = useState({ email: '', password: '', remember: false })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -19,7 +15,7 @@ export default function LoginPage({ onLogin, onRegister }) {
     setError('')
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     if (!form.email || !form.password) {
@@ -27,17 +23,20 @@ export default function LoginPage({ onLogin, onRegister }) {
       return
     }
     setLoading(true)
-    setTimeout(() => {
-      const user = DEMO_USERS.find(
-        u => u.email === form.email && u.password === form.password
-      )
-      if (user) {
-        onLogin(user)
+
+    try {
+      await signInWithEmailAndPassword(auth, form.email, form.password)
+    } catch (loginError) {
+      if (loginError.code === 'auth/invalid-credential' || loginError.code === 'auth/wrong-password') {
+        setError('Invalid email or password.')
+      } else if (loginError.code === 'auth/user-not-found') {
+        setError('No account found for that email.')
       } else {
-        setError('Invalid email or password. Try: jobseeker@parttimed.ph / password123')
+        setError('Could not sign in. Please try again.')
       }
+    } finally {
       setLoading(false)
-    }, 800)
+    }
   }
 
   return (
@@ -223,11 +222,7 @@ export default function LoginPage({ onLogin, onRegister }) {
             </div>
           </div>
 
-          {/* Demo hint */}
-          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-xs text-center">
-            <strong>Demo:</strong> jobseeker@parttimed.ph / password123 <br/>
-            <strong>Demo:</strong> employer@parttimed.ph / password123
-          </div>
+          {/* Demo hint removed */}
         </div>
       </div>
     </div>
