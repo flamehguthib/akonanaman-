@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MapPin, Clock, DollarSign, Bookmark, Share2, Check } from 'lucide-react';
 
 interface JobPostProps {
@@ -13,6 +13,7 @@ interface JobPostProps {
     postedTime: string;
     applicants: number;
     saves: number;
+    onApply?: () => void;
 }
 
 export function JobPost ({
@@ -27,19 +28,24 @@ export function JobPost ({
     postedTime,
     applicants,
     saves,
+    onApply,
 }: JobPostProps){
     const [saved, setSaved] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [showDetail, setShowDetail] = useState(false);
 
-    const handleShare = () => {
-    // Logic to copy the current URL or a specific job link
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    };
-    
-    // Reset the "Copied" state after 2 seconds
-    setTimeout(() => setCopied(false), 2000);
-    return(
+        const handleShare = () => {
+            navigator.clipboard.writeText(window.location.href);
+            setCopied(true);
+        };
+
+        useEffect(() => {
+            if (!copied) return
+            const t = setTimeout(() => setCopied(false), 2000)
+            return () => clearTimeout(t)
+        }, [copied])
+    return (
+        <>
         <article className="group relative rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-all hover:border-blue-400"
             aria-labelledby="job-title">
             <div className="flex items-start justify-between">
@@ -79,7 +85,10 @@ export function JobPost ({
             </p>
             <div className="mt-6 flex items-center justify-between border-t border-gray-50 pt-4">
                 <span className="text-xs text-gray-400">{postedTime} • {applicants} applicants</span>
-                <button className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors">
+                <button
+                    onClick={() => setShowDetail(true)}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+                >
                     Apply Now
                 </button>
             </div>
@@ -105,5 +114,43 @@ export function JobPost ({
           </button>
           </div>
         </article>
+        <JobPostDetailModal
+          open={showDetail}
+          onClose={() => setShowDetail(false)}
+          job={{ company, companyLogo, jobTitle, location, jobType, salary, description, image, postedTime, applicants }}
+          onApply={onApply}
+        />
+        </>
     );
+}
+
+// Detail modal rendered outside to avoid nesting issues
+export function JobPostDetailModal({ open, onClose, job, onApply }:{ open:boolean, onClose:()=>void, job: any, onApply?:()=>void }){
+        if (!open) return null
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+                <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+                <div className="relative z-10 max-w-2xl w-full p-6 bg-white rounded-2xl shadow-lg">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 className="font-extrabold text-lg text-indigo-950">{job?.jobTitle || job?.title}</h2>
+                            <p className="text-sm text-gray-500">{job?.company || job?.companyName}</p>
+                        </div>
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-700">Close</button>
+                    </div>
+                    <div className="mt-4 text-sm text-gray-700">
+                        <p className="mb-3">{job?.description}</p>
+                        <div className="text-sm text-gray-600">
+                            <div><strong>Location:</strong> {job?.location}</div>
+                            <div><strong>Schedule:</strong> {job?.jobType}</div>
+                            <div><strong>Pay:</strong> {job?.salary || job?.pay}</div>
+                        </div>
+                    </div>
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                        <button onClick={onClose} className="px-4 py-2 rounded-lg border">Cancel</button>
+                        <button onClick={() => { onApply?.(); onClose(); }} className="px-4 py-2 rounded-lg bg-blue-600 text-white">Apply</button>
+                    </div>
+                </div>
+            </div>
+        )
 }

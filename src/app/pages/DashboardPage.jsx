@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
+import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp, where, getDoc, doc } from 'firebase/firestore'
 import Logo from '../../components/Logo.jsx'
 import { db } from '../../lib/firebase.js'
 
@@ -10,7 +10,7 @@ const SAMPLE_JOBS = [
   { id: 4, title: 'Food Delivery Rider', company: 'FoodPanda', location: 'Naga City (roving)', pay: '₱600/day + tips', type: 'Delivery', schedule: 'Flexible', posted: '1 day ago', tags: ['Part-time', 'With motorcycle'], logo: 'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fcdn.coconuts.co%2Fcoconuts%2Fwp-content%2Fuploads%2F2016%2F11%2F1_vhong.jpg&f=1&nofb=1&ipt=2fa2826842c8ced6a07f9d664234615fede5e117d169ef3eebfcb6ce318f8e8e'},
   { id: 5, title: 'Event Staff / Usher', company: 'Naga Events Hub', location: 'Various venues, Naga City', pay: '₱550/event', type: 'Events', schedule: 'Weekends', posted: '2 days ago', tags: ['Part-time', 'Casual'], logo: 'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Fwww2.naga.gov.ph%2Fwp-content%2Fuploads%2F2022%2F05%2Fika-ako-kita-naga-1536x1536.png&f=1&nofb=1&ipt=3717e13391b9d3dac4e98968c224661d357501f63a7ac724e236b3eb67e947ee'},
   { id: 6, title: 'Online Tutor (Math/Science)', company: 'StudyBuddy PH', location: 'Remote', pay: '₱300/hr', type: 'Education', schedule: 'Flexible', posted: '3 days ago', tags: ['Part-time', 'Remote', 'College students'], logo: 'https://scontent.fmnl13-4.fna.fbcdn.net/v/t39.30808-6/669565571_1557188709744637_6114279130776364363_n.jpg?_nc_cat=107&ccb=1-7&_nc_sid=13d280&_nc_eui2=AeFPyGDiceRQbicHCWIiv4lUL03-exvkoLovTf57G-SguvsJTk_VDHl0eV6ruos-F6nZ8srEoko3IHFtfgfftJHi&_nc_ohc=BRrMpomN8E0Q7kNvwEdzXxa&_nc_oc=AdofZ7ToDMr61VCW-0soqti434V8fK3i7cmd58QG6rWUd2zRaIGMqs9-Izh47JY9cZM&_nc_zt=23&_nc_ht=scontent.fmnl13-4.fna&_nc_gid=Ksa6_QUTuTXDnd6LwjiEWQ&_nc_ss=7b2a8&oh=00_Af2umUYdTVAp3cmOzrgYFwoV1Rj5HNMoxEXFiViyHu67Cw&oe=69F91393' },
-]
+];
 
 const EMPLOYER_APPLICANTS = [
   { id: 1, name: 'Christian Josef Ace', role: 'Barista / Cashier', status: 'New', avatar: 'https://external-content.duckduckgo.com/iu/?u=https%3A%2F%2Ftse1.mm.bing.net%2Fth%2Fid%2FOIP.W1CewKcwPGmaoOT7tPaZCgHaHk%3Fpid%3DApi&f=1&ipt=f6ec4e18e5398e21759c2bfab0ba70beaf8493fa1181fca8c2fd38b91e07dccc', date: 'Today' },
@@ -58,15 +58,27 @@ export default function DashboardPage({ user, onLogout }) {
     description: '',
     imageUrl: '',
   })
+  const [selectedJob, setSelectedJob] = useState(null)
+  const [selectedApplicant, setSelectedApplicant] = useState(null)
+  const [loadingApplicant, setLoadingApplicant] = useState(false)
 
   useEffect(() => {
-    if (user?.type === 'employer') {
+    if (user?.type === 'employer' && activeNav === 'browse') {
       setActiveNav('applicants')
+    } else if (user?.type === 'jobseeker' && activeNav === 'applicants') {
+      setActiveNav('browse')
     }
-  }, [user])
+  }, [user?.type])
 
   useEffect(() => {
-    const jobsQuery = query(collection(db, 'jobs'), orderBy('createdAt', 'desc'))
+    if (!user?.uid) return
+
+    const isEmployer = user?.type === 'employer'
+    const jobsQuery = isEmployer
+      ? query(collection(db, 'jobs'), 
+          where('employerUid', '==', user.uid),
+          orderBy('createdAt', 'desc'))
+      : query(collection(db, 'jobs'), orderBy('createdAt', 'desc'))
 
     const unsubscribe = onSnapshot(jobsQuery, (snapshot) => {
       setLiveJobs(
@@ -78,7 +90,7 @@ export default function DashboardPage({ user, onLogout }) {
     })
 
     return unsubscribe
-  }, [])
+  }, [user?.uid, user?.type])
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'applications'), (snapshot) => {
@@ -111,7 +123,7 @@ export default function DashboardPage({ user, onLogout }) {
 
   const allJobs = [
     ...liveJobs.map(job => ({
-      id: job.id,
+      id: String(job.id),
       title: job.title || 'Untitled Job',
       company: job.employerName || 'Employer',
       location: job.location || '',
@@ -124,7 +136,7 @@ export default function DashboardPage({ user, onLogout }) {
       description: job.description || '',
       employerUid: job.employerUid,
     })),
-    ...SAMPLE_JOBS,
+    ...SAMPLE_JOBS.map(s => ({ ...s, id: String(s.id) })),
   ]
 
   const filteredJobs = allJobs.filter(j =>
@@ -135,11 +147,34 @@ export default function DashboardPage({ user, onLogout }) {
 
   const employerJobs = liveJobs.filter(job => job.employerUid === user.uid)
   const employerApplicants = applications.filter(app => app.employerUid === user.uid)
+  const employerApplicantsSorted = employerApplicants.slice().sort((a, b) => {
+    const ta = a?.createdAt?.toMillis ? a.createdAt.toMillis() : (a?.createdAt || 0)
+    const tb = b?.createdAt?.toMillis ? b.createdAt.toMillis() : (b?.createdAt || 0)
+    return tb - ta
+  })
 
   const updateJobForm = (field, value) => {
     setJobForm(prev => ({ ...prev, [field]: value }))
     setPostError('')
     setPostSuccess('')
+  }
+
+  const fetchAndOpenApplicant = async (app) => {
+    setLoadingApplicant(true)
+    try {
+      const uid = app.applicantUid || app.applicantId || app.applicant || null
+      let profile = {}
+      if (uid) {
+        const userDoc = await getDoc(doc(db, 'users', uid))
+        if (userDoc.exists()) profile = userDoc.data()
+      }
+      setSelectedApplicant({ ...app, ...profile })
+    } catch (err) {
+      console.error('Failed to fetch applicant profile', err)
+      setSelectedApplicant(app)
+    } finally {
+      setLoadingApplicant(false)
+    }
   }
 
   const handleJobImageChange = async (event) => {
@@ -182,7 +217,7 @@ export default function DashboardPage({ user, onLogout }) {
         ...prev,
         imageUrl: result.secure_url,
       }))
-    } catch (error) {
+    } catch {
       setJobForm(prev => ({
         ...prev,
         imageUrl: '',
@@ -195,13 +230,14 @@ export default function DashboardPage({ user, onLogout }) {
   }
 
   const handleApply = async (job) => {
-    if (appliedJobIds.has(job.id)) return
+    const jobId = String(job.id)
+    if (appliedJobIds.has(jobId)) return
 
-    setAppliedJobs(prev => [...prev, job.id])
+    setAppliedJobs(prev => [...prev, jobId])
 
     try {
       await addDoc(collection(db, 'applications'), {
-        jobId: job.id,
+        jobId,
         jobTitle: job.title,
         company: job.company,
         employerUid: job.employerUid || null,
@@ -211,7 +247,7 @@ export default function DashboardPage({ user, onLogout }) {
         status: 'New',
         createdAt: serverTimestamp(),
       })
-    } catch (error) {
+    } catch {
       setAppliedJobs(prev => prev.filter(id => id !== job.id))
     }
   }
@@ -250,7 +286,7 @@ export default function DashboardPage({ user, onLogout }) {
         imageUrl: '',
       })
       setPostSuccess('Hiring posted successfully.')
-    } catch (error) {
+    } catch {
       setPostError(error?.message || 'Could not post the job right now.')
     } finally {
       setPosting(false)
@@ -399,7 +435,7 @@ export default function DashboardPage({ user, onLogout }) {
                       ))}
                     </div>
                     <button
-                      onClick={() => handleApply(job)}
+                      onClick={() => setSelectedJob(job)}
                       disabled={appliedJobIds.has(job.id)}
                       className={`w-full py-2 rounded-xl text-sm font-semibold transition-all ${
                         appliedJobIds.has(job.id)
@@ -439,22 +475,51 @@ export default function DashboardPage({ user, onLogout }) {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {userApplications.map(app => (
-                    <div key={app.id} className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 bg-violet-50 flex items-center justify-center text-violet-700 font-bold text-xs">
-                          {app.company ? app.company.slice(0, 2).toUpperCase() : 'JB'}
+                  {userApplications.map(app => {
+                    const job = allJobs.find(j => String(j.id) === String(app.jobId))
+                    return (
+                      <div
+                        key={app.id}
+                        onClick={() => setSelectedJob(job || { id: app.jobId, title: app.jobTitle, company: app.company, description: app.description || 'No description available.' })}
+                        className="bg-white cursor-pointer hover:shadow-md border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.04)] p-4 flex items-center justify-between gap-4"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 bg-violet-50 flex items-center justify-center text-violet-700 font-bold text-xs">
+                            {app.company ? app.company.slice(0, 2).toUpperCase() : 'JB'}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-indigo-950 text-sm truncate">{app.jobTitle || 'Hiring'}</p>
+                            <p className="text-xs text-gray-500 truncate">{app.company || 'Employer'} · {app.createdAt?.toDate ? app.createdAt.toDate().toLocaleDateString() : 'Recently applied'}</p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="font-semibold text-indigo-950 text-sm truncate">{app.jobTitle || 'Hiring'}</p>
-                          <p className="text-xs text-gray-500 truncate">{app.company || 'Employer'} · {app.createdAt?.toDate ? app.createdAt.toDate().toLocaleDateString() : 'Recently applied'}</p>
-                        </div>
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium flex-shrink-0">{app.status || 'Under Review'}</span>
                       </div>
-                      <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium flex-shrink-0">{app.status || 'Under Review'}</span>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Job detail modal for selected application */}
+          {selectedJob && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedJob(null)} />
+              <div className="relative z-10 max-w-2xl w-full p-6 bg-white rounded-2xl shadow-lg">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="font-extrabold text-lg text-indigo-950">{selectedJob.title}</h2>
+                    <p className="text-sm text-gray-500">{selectedJob.company}</p>
+                  </div>
+                  <button onClick={() => setSelectedJob(null)} className="text-gray-400 hover:text-gray-700">Close</button>
+                </div>
+                <div className="mt-4 text-sm text-gray-700">
+                  <p>{selectedJob.description || 'No description available.'}</p>
+                </div>
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <span className="text-sm font-semibold text-violet-700">{selectedJob.pay || ''}</span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -467,8 +532,12 @@ export default function DashboardPage({ user, onLogout }) {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {employerApplicants.map(app => (
-                    <div key={app.id} className="bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center gap-4">
+                  {employerApplicantsSorted.map(app => (
+                    <button
+                      key={app.id}
+                      onClick={() => fetchAndOpenApplicant(app)}
+                      className="w-full text-left bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-4 flex items-center gap-4 hover:shadow-md transition-shadow"
+                    >
                       <div className="w-10 h-10 rounded-full bg-violet-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0 overflow-hidden">
                         <span>{(app.applicantName || 'A').split(' ').map(n => n[0]).join('').slice(0, 2)}</span>
                       </div>
@@ -483,7 +552,7 @@ export default function DashboardPage({ user, onLogout }) {
                       }`}>
                         {app.status || 'New'}
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -555,6 +624,10 @@ export default function DashboardPage({ user, onLogout }) {
 
               <div className="mt-4 bg-white border border-violet-100 rounded-2xl shadow-[0_8px_24px_rgba(84,23,215,0.08)] p-5">
                 <h3 className="font-bold text-indigo-950 mb-3">Your recent postings</h3>
+                {/* DEBUG: show current user uid and employerUid on jobs to help trace issues */}
+                <div className="mb-3 text-xs text-gray-400">
+                  <div>Current user uid: <span className="font-mono text-[11px] text-violet-700">{user?.uid || 'n/a'}</span></div>
+                </div>
                 {employerJobs.length === 0 ? (
                   <p className="text-sm text-gray-500">No hirings posted yet.</p>
                 ) : (
@@ -565,6 +638,7 @@ export default function DashboardPage({ user, onLogout }) {
                         <div className="min-w-0">
                           <p className="font-semibold text-sm text-indigo-950 truncate">{job.title}</p>
                           <p className="text-xs text-gray-500">{job.location} · {job.pay}</p>
+                          <p className="text-xs text-gray-400 mt-1">job.id: <span className="font-mono">{job.id}</span> • employerUid: <span className="font-mono">{job.employerUid || 'null'}</span></p>
                         </div>
                       </div>
                     ))}
@@ -593,6 +667,123 @@ export default function DashboardPage({ user, onLogout }) {
 
         </main>
       </div>
+
+      {/* Job detail modal */}
+      {selectedJob && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedJob(null)} />
+          <div className="relative z-10 max-w-2xl w-full p-6 bg-white rounded-2xl shadow-lg mx-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-extrabold text-lg text-indigo-950">{selectedJob.title}</h2>
+                <p className="text-sm text-gray-500">{selectedJob.company}</p>
+              </div>
+              <button onClick={() => setSelectedJob(null)} className="text-gray-400 hover:text-gray-700 text-xl">×</button>
+            </div>
+            <div className="mt-4 text-sm text-gray-700 space-y-3">
+              <div>
+                <p className="font-semibold text-gray-900 mb-1">Description</p>
+                <p>{selectedJob.description}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500">Location</p>
+                  <p className="font-medium">{selectedJob.location}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Schedule</p>
+                  <p className="font-medium">{selectedJob.schedule}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Pay</p>
+                  <p className="font-medium text-violet-700">{selectedJob.pay}</p>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button onClick={() => setSelectedJob(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={() => { handleApply(selectedJob); setSelectedJob(null); }} className="px-4 py-2 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Apply Now</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Applicant detail modal (employer) */}
+      {selectedApplicant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSelectedApplicant(null)} />
+          <div className="relative z-10 max-w-lg w-full p-6 bg-white rounded-2xl shadow-lg mx-4">
+            {loadingApplicant ? (
+              <div className="flex items-center justify-center p-8">
+                <div className="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-10 w-10" />
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-14 h-14 rounded-full overflow-hidden bg-violet-50 border border-gray-100 flex items-center justify-center">
+                      {selectedApplicant.photoURL || selectedApplicant.avatar ? (
+                        <img src={selectedApplicant.photoURL || selectedApplicant.avatar} alt={selectedApplicant.applicantName || 'Applicant'} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-violet-700 font-bold">{(selectedApplicant.applicantName || 'A').split(' ').map(n => n[0]).join('').slice(0,2)}</span>
+                      )}
+                    </div>
+                    <div>
+                      <h2 className="font-extrabold text-lg text-indigo-950">{selectedApplicant.applicantName || 'Applicant'}</h2>
+                      <p className="text-sm text-gray-500">{selectedApplicant.applicantEmail || ''}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedApplicant(null)} className="text-gray-400 hover:text-gray-700 text-xl">×</button>
+                </div>
+
+                <div className="mt-4 text-sm text-gray-700 space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-500">Applied for</p>
+                      <p className="font-medium">{selectedApplicant.jobTitle || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Applied at</p>
+                      <p className="font-medium">{selectedApplicant.createdAt?.toDate ? selectedApplicant.createdAt.toDate().toLocaleString() : String(selectedApplicant.createdAt || '')}</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500">Message</p>
+                    <p className="font-medium text-sm">{selectedApplicant.message || 'No message provided.'}</p>
+                  </div>
+
+                  {selectedApplicant.phone && (
+                    <div>
+                      <p className="text-xs text-gray-500">Phone</p>
+                      <p className="font-medium"><a href={`tel:${selectedApplicant.phone}`} className="text-violet-700">{selectedApplicant.phone}</a></p>
+                    </div>
+                  )}
+
+                  {selectedApplicant.bio && (
+                    <div>
+                      <p className="text-xs text-gray-500">About</p>
+                      <p className="font-medium text-sm">{selectedApplicant.bio}</p>
+                    </div>
+                  )}
+
+                  {selectedApplicant.resumeUrl && (
+                    <div>
+                      <p className="text-xs text-gray-500">Resume</p>
+                      <p className="font-medium"><a href={selectedApplicant.resumeUrl} target="_blank" rel="noreferrer" className="text-violet-700">View resume</a></p>
+                    </div>
+                  )}
+
+                </div>
+
+                <div className="mt-6 flex items-center justify-end gap-2">
+                  <a href={`mailto:${selectedApplicant.applicantEmail || ''}`} className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Email</a>
+                  <button onClick={() => setSelectedApplicant(null)} className="px-4 py-2 rounded-lg bg-violet-600 text-white hover:bg-violet-700">Close</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

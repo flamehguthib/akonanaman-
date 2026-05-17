@@ -5,7 +5,7 @@ import './App.css'
 
 export default function Hi(){
   return (
-    <div class="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50">
       <Header />
       <main className="mx-auto flex max-w-screen-2xl items-start justify-start gap-6 p-6">
         <div className="sticky top-24 hidden shrink-0 lg:block w-80"><Sidebar /></div>
@@ -20,6 +20,7 @@ export default function Hi(){
           description="We are looking for a person who is passionate in hard labor, preferably someone with a strong build."
           postedTime="12h ago"
           applicants={12456}
+          saves={234}
         />
         <JobPost 
           company="Tree Society"
@@ -31,6 +32,7 @@ export default function Hi(){
           description="We want to hire people who love bananas."
           postedTime="1h ago"
           applicants={21}
+          saves={5}
         />
         <JobPost 
           company="Chris' Pizza"
@@ -42,6 +44,7 @@ export default function Hi(){
           description="Hello fellow CP lovers! If you enjoy pizza, then you can now work in CP as a waiter. PM us your details and we'll help you out."
           postedTime="6h ago"
           applicants={777}
+          saves={89}
         />
         </section>
         <div className="hidden xl:block w-72 shrink-0" />
